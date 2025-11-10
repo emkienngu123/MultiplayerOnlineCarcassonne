@@ -1,9 +1,6 @@
 
 # carcassonne
-Carcassonne implementation in python
-
-![Example game](https://github.com/wingedsheep/carcassonne/blob/master/example_game.gif)
-
+Carcassonne with networking multiplayer , RL and MCTS  implementation in python
 ## Features
 
 * Tilesets 

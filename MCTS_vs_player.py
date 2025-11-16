@@ -39,10 +39,11 @@ class SimpleMCTS:
     """
     A basic implementation of Monte Carlo Tree Search for Carcassonne.
     """
-    def __init__(self, player_id: int, simulations: int = 1000, exploration_factor: float = 1.4):
+    def __init__(self, player_id: int, simulations: int = 1000, exploration_factor: float = 1.4, max_rollout_depth: int = 30):
         self.player_id = player_id
         self.simulations = simulations
         self.exploration_factor = exploration_factor
+        self.max_rollout_depth = max_rollout_depth
 
     def get_action(self, game_state: CarcassonneGameState) -> Action:
         """
@@ -118,9 +119,11 @@ class SimpleMCTS:
         Returns the ID of the winner (0 or 1), or None for a tie.
         """
         simulation_state = deepcopy(state)
-        
+        move_counter = 0
         # The game loop uses StateUpdater.apply_action and ActionUtil.get_possible_actions
         while not simulation_state.is_terminated():
+            if move_counter >= self.max_rollout_depth:
+                break
             
             possible_actions = ActionUtil.get_possible_actions(simulation_state)
             
@@ -130,6 +133,7 @@ class SimpleMCTS:
             # Randomly select and perform an action
             action = random.choice(possible_actions)
             simulation_state = StateUpdater.apply_action(game_state=simulation_state, action=action)
+            move_counter+=1
             
         scores = simulation_state.scores
         if not scores:
@@ -418,7 +422,8 @@ game = CarcassonneGame(
 mcts_agent = SimpleMCTS(
     player_id=MCTS_PLAYER_INDEX,
     exploration_factor=1.4, 
-    simulations=1
+    simulations=10,
+    max_rollout_depth=50
 )
 
 clock = pygame.time.Clock()
@@ -445,7 +450,6 @@ while running:
         
         # 3. Immediately redraw to show the MCTS move
         draw_board(game.state , drag_pos)
-        pygame.time.wait(1000) # Pause for 1 second to make the move visible
         
         # Check if the MCTS move ended the game
         if game.is_finished():

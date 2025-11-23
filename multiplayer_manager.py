@@ -1,0 +1,390 @@
+# multiplayer_manager.py
+
+from typing import Optional, Dict, Any, Callable
+from network_server import NetworkServer
+from network_client import NetworkClient
+from wingedsheep.carcassonne.carcassonne_game import CarcassonneGame
+from wingedsheep.carcassonne.tile_sets.tile_sets import TileSet
+from wingedsheep.carcassonne.tile_sets.supplementary_rules import SupplementaryRule
+
+class MultiplayerManager:
+    
+    def __init__(self):
+        self.server: Optional[NetworkServer] = None
+        self.client: Optional[NetworkClient] = None
+        self.is_host = False
+        self.is_connected = False
+        self.game: Optional[CarcassonneGame] = None
+        self.game_callbacks: Dict[str, Callable] = {}
+        
+    def set_callback(self, event_type: str, callback: Callable):
+        """Đăng ký callback cho các sự kiện game"""
+        self.game_callbacks[event_type] = callback
+    
+    def _trigger_callback(self, event_type: str, data: Any = None):
+        """Kích hoạt callback"""
+        if event_type in self.game_callbacks:
+            try:
+                self.game_callbacks[event_type](data)
+            except Exception as e:
+                print(f"Error in callback {event_type}: {e}")
+    
+    def host_game(self, port: int = 5000, host_name: str = "Host") -> Dict[str, Any]:
+        """Bắt đầu host game - host chỉ là server, không phải player"""
+        try:
+            self.server = NetworkServer(port)
+            game_id = self.server.start_server(host_name)
+            
+            if game_id:
+                self.is_host = True
+                self.is_connected = False  # Host chưa connected như player
+                self.game = None  # Host không có game local
+                
+                print(f"Server hosted successfully! Game ID: {game_id}")
+                self._trigger_callback('game_hosted', {'game_id': game_id, 'port': port})
+                
+                return {'success': True, 'game_id': game_id, 'port': port}
+            else:
+                return {'success': False, 'error': 'Failed to start server'}
+                
+        except Exception as e:
+            print(f"Error hosting game: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def join_game(self, host_ip: str, game_id: str, player_name: str, port: int = 5000) -> Dict[str, Any]:
+        try:
+            self.client = NetworkClient()
+            
+            self.client.set_message_handler('game_started', self._on_game_started)
+            self.client.set_message_handler('game_update', self._on_game_update)
+            self.client.set_message_handler('game_finished', self._on_game_finished)
+            self.client.set_message_handler('player_joined', self._on_player_joined)
+            self.client.set_message_handler('player_left', self._on_player_left)
+            
+            result = self.client.connect_to_game(host_ip, port, game_id, player_name)
+            
+            if result['success']:
+                self.is_connected = True
+                self._trigger_callback('game_joined', result)
+                return result
+            else:
+                self.client = None
+                return result
+                
+        except Exception as e:
+            print(f"Error joining game: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def join_own_game(self, player_name: str) -> Dict[str, Any]:
+        """Host join vào game của chính mình như một player"""
+        if not self.is_host or not self.server:
+            return {'success': False, 'error': 'Not hosting a game'}
+        
+        # Join vào server của chính mình
+        return self.join_game('localhost', self.server.game_id, player_name, self.server.port)
+    
+    def _on_game_started(self, message: Dict[str, Any]):
+        print("Multiplayer game started!")
+        
+        if self.client:
+            players = message.get('players', [])
+            
+            try:
+                self.game = CarcassonneGame(
+                    players=len(players),
+                    tile_sets=[TileSet.BASE, TileSet.THE_RIVER, TileSet.INNS_AND_CATHEDRALS],
+                    supplementary_rules=[SupplementaryRule.ABBOTS, SupplementaryRule.FARMERS]
+                )
+                print(f"Game created with {len(players)} players")
+                
+                game_state = message.get('game_state')
+                if game_state:
+                    print("Received game state from server")
+                    
+            except Exception as e:
+                print(f"Error creating game: {e}")
+                self.game = CarcassonneGame(
+                    players=2,
+                    tile_sets=[TileSet.BASE],
+                    supplementary_rules=[]
+                )
+            
+        self._trigger_callback('game_started', message)
+    
+    def _on_game_update(self, message: Dict[str, Any]):
+        game_state = message.get('game_state', {})
+        
+        if self.game and game_state:
+            try:
+                # Cập nhật current player
+                if 'current_player' in game_state:
+                    self.game.state.current_player = game_state['current_player']
+                    
+                # Cập nhật scores
+                if 'scores' in game_state:
+                    self.game.state.scores = game_state['scores']
+                    
+                # Cập nhật meeples
+                if 'meeples' in game_state:
+                    self.game.state.meeples = game_state['meeples']
+                
+                # Cập nhật phase
+                if 'phase' in game_state:
+                    phase_str = game_state['phase']
+                    print(f">>> Updating phase to: {phase_str}")
+                
+                # Cập nhật next_tile - QUAN TRỌNG!
+                if 'next_tile' in game_state:
+                    next_tile_data = game_state['next_tile']
+                    if next_tile_data:
+                        print(f">>> Next tile info: {next_tile_data}")
+                        # Deserialize next_tile từ server
+                        deserialized_next_tile = self._deserialize_tile(next_tile_data)
+                        if deserialized_next_tile:
+                            self.game.state.next_tile = deserialized_next_tile
+                            print("CLIENT: Next tile updated successfully")
+                    else:
+                        self.game.state.next_tile = None
+                        print(">>> No next tile")
+                
+                # Cập nhật board - QUAN TRỌNG!
+                if 'board' in game_state:
+                    board_data = game_state['board']
+                    print(f"CLIENT: Received board update with {len(board_data)} rows")
+                    self._deserialize_board(board_data)
+                
+                # Cập nhật tiles remaining
+                if 'tiles_remaining' in game_state:
+                    tiles_remaining = game_state['tiles_remaining']
+                    print(f">>> Tiles remaining: {tiles_remaining}")
+                    # Update deck size if needed
+                    
+                print(f">>> Game state fully updated. Current player: {self.game.state.current_player}")
+                
+            except Exception as e:
+                print(f"Error updating game state: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        self._trigger_callback('game_updated', message)
+    
+    def _deserialize_tile(self, tile_data):
+        """Deserialize tile from server data"""
+        try:
+            if not tile_data:
+                return None
+            
+            print(f"CLIENT: Deserializing tile: {tile_data}")
+            
+            # Import cần thiết
+            from wingedsheep.carcassonne.objects.tile import Tile
+            
+            # Thay vì tạo tile rỗng, cần tạo tile với đầy đủ properties
+            # Tạm thời tạo tile cơ bản và copy properties
+            tile = Tile()
+            
+            # Copy tất cả properties từ server data
+            if 'turns' in tile_data:
+                tile.turns = tile_data['turns']
+                print(f"CLIENT: Set tile turns to {tile.turns}")
+            
+            if 'description' in tile_data:
+                tile.description = tile_data['description']
+                print(f"CLIENT: Set tile description to {tile.description}")
+                
+            if 'image' in tile_data:
+                tile.image = tile_data['image']
+                print(f"CLIENT: Set tile image to {tile.image}")
+            
+            # Copy các thuộc tính game logic
+            for attr in ['road', 'city', 'grass', 'river']:
+                if attr in tile_data and tile_data[attr]:
+                    try:
+                        # Cần deserialize các connection objects nếu có
+                        print(f"CLIENT: Found {attr} data: {tile_data[attr]}")
+                        # TODO: Deserialize connection objects properly
+                    except Exception as e:
+                        print(f"CLIENT: Error setting {attr}: {e}")
+            
+            print(f"CLIENT: Tile deserialized successfully - desc: {getattr(tile, 'description', 'None')}")
+            return tile
+            
+        except Exception as e:
+            print(f"CLIENT: Error deserializing tile: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Fallback: Tạo tile cơ bản
+            try:
+                from wingedsheep.carcassonne.objects.tile import Tile
+                basic_tile = Tile()
+                basic_tile.turns = tile_data.get('turns', 0)
+                print(f"CLIENT: Created fallback tile")
+                return basic_tile
+            except:
+                return None
+    
+    def _deserialize_board(self, board_data):
+        """Deserialize board from server data"""
+        try:
+            print(f"CLIENT: Receiving board data...")
+            print(f"CLIENT: Board dimensions: {len(board_data)} x {len(board_data[0]) if board_data else 0}")
+            
+            tiles_received = 0
+            for row_idx, row_data in enumerate(board_data):
+                for col_idx, tile_data in enumerate(row_data):
+                    if tile_data is not None:
+                        tiles_received += 1
+                        print(f"CLIENT: Received tile at [{row_idx}][{col_idx}]: {tile_data}")
+            
+            print(f"CLIENT: Total tiles received: {tiles_received}")
+            
+            # Cập nhật board state
+            if hasattr(self.game.state, 'board'):
+                print("CLIENT: Updating local board state...")
+                # Clear current board
+                for row_idx, row_data in enumerate(board_data):
+                    if row_idx < len(self.game.state.board):
+                        for col_idx, tile_data in enumerate(row_data):
+                            if col_idx < len(self.game.state.board[row_idx]):
+                                if tile_data is None:
+                                    self.game.state.board[row_idx][col_idx] = None
+                                else:
+                                    # Deserialize tile object properly
+                                    print(f"CLIENT: Processing tile at [{row_idx}][{col_idx}]: {tile_data}")
+                                    deserialized_tile = self._deserialize_tile(tile_data)
+                                    if deserialized_tile:
+                                        self.game.state.board[row_idx][col_idx] = deserialized_tile
+                                        print(f"CLIENT: Tile created and placed at [{row_idx}][{col_idx}]")
+                                    else:
+                                        print(f"CLIENT: Failed to deserialize tile at [{row_idx}][{col_idx}]")
+                
+                print(f"CLIENT: Board deserialized successfully")
+            else:
+                print("CLIENT: ERROR - No board attribute in game state")
+                
+        except Exception as e:
+            print(f"CLIENT: Error deserializing board: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _on_game_finished(self, message: Dict[str, Any]):
+        self._trigger_callback('game_finished', message)
+    
+    def _on_player_joined(self, message: Dict[str, Any]):
+        self._trigger_callback('player_joined', message)
+    
+    def _on_player_left(self, message: Dict[str, Any]):
+        self._trigger_callback('player_left', message)
+    
+    def send_action(self, action) -> bool:
+        """Chỉ clients mới có thể gửi action"""
+        print(f">>> MultiplayerManager.send_action called")
+        print(f">>> Is host: {self.is_host}")
+        print(f">>> Is connected: {self.is_connected}")
+        print(f">>> Action type: {type(action).__name__}")
+        
+        if self.is_host:
+            print(">>> ERROR: Host cannot send actions - host is server only!")
+            return False
+        
+        if not self.is_connected or not self.client:
+            print(">>> ERROR: Not connected as client!")
+            return False
+        
+        # Chỉ clients mới gửi action
+        print(">>> Sending action as CLIENT")
+        action_data = self._serialize_action(action)
+        print(f">>> Serialized action: {action_data}")
+        
+        message = {
+            'type': 'game_action',
+            'action': action_data
+        }
+        
+        # THÊM LOG ĐỂ KIỂM TRA DOUBLE SEND
+        print(f"🚨 SENDING ACTION - Action ID: {id(action)}")
+        print(f"🚨 Message ID: {id(message)}")
+        
+        result = self.client._send_message(message)
+        print(f">>> Client send result: {result}")
+        
+        print(f"🚨 ACTION SENT COMPLETED - Action ID: {id(action)}")
+        return result
+    
+    def _serialize_action(self, action) -> Dict[str, Any]:
+        """Chuyển action thành dict để gửi qua network"""
+        import pickle
+        import base64
+        
+        try:
+            # Serialize action object bằng pickle
+            pickled_action = pickle.dumps(action)
+            encoded_action = base64.b64encode(pickled_action).decode('utf-8')
+            
+            action_data = {
+                'type': type(action).__name__,
+                'pickled_data': encoded_action
+            }
+            
+            print(f">>> Serialized action with pickle: {type(action).__name__}")
+            return action_data
+            
+        except Exception as e:
+            print(f">>> Error serializing action with pickle: {e}")
+            return {'type': type(action).__name__, 'error': 'serialization_failed'}
+    
+    def get_game(self) -> Optional[CarcassonneGame]:
+        return self.game
+    
+    def get_connection_info(self) -> Dict[str, Any]:
+        info = {
+            'is_connected': self.is_connected,
+            'is_host': self.is_host,
+            'has_game': self.game is not None
+        }
+        
+        if self.is_host and self.server:
+            info.update(self.server.get_status())
+        elif not self.is_host and self.client:
+            info.update(self.client.get_status())
+        
+        return info
+    
+    def disconnect(self):
+        self.is_connected = False
+        
+        if self.server:
+            self.server.stop_server()
+            self.server = None
+        
+        if self.client:
+            self.client.disconnect()
+            self.client = None
+        
+        self.game = None
+        self.is_host = False
+        
+        self._trigger_callback('disconnected', {})
+        print("Disconnected from multiplayer game")
+    
+    def is_my_turn(self) -> bool:
+        """Kiểm tra có phải lượt của mình không"""
+        if self.is_host:
+            print(">>> is_my_turn: Host never has turns")
+            return False
+            
+        if not self.game:
+            print(">>> is_my_turn: No game object")
+            return False
+        
+        current_player = self.game.state.current_player
+        print(f">>> is_my_turn: Current player = {current_player}")
+        
+        if self.client:
+            # Client kiểm tra player_id
+            print(f">>> is_my_turn: Client check - current_player == {self.client.player_id}? {current_player == self.client.player_id}")
+            return current_player == self.client.player_id
+        
+        print(">>> is_my_turn: No valid client connection")
+        return False

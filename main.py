@@ -26,9 +26,10 @@ from resources import (
 from ui_manager import (
     play_music, draw_pre_game_screen, draw_player_input_screen, draw_player_info, 
     draw_phase_indicator, draw_tiles_remaining, draw_pause_menu, draw_game_over_screen,
-    draw_pause_button # Correctly imported
+    draw_pause_button, draw_host_game_screen, draw_join_game_screen # Correctly imported
 )
 from game_view import draw_board
+from multiplayer_manager import MultiplayerManager
 
 # --- COORDINATE & OFFSET LOGIC (FIXED CENTERING) ---
 BOARD_CENTER_X = WINDOW_WIDTH // 2
@@ -67,6 +68,68 @@ pause_buttons = {}
 music_volume = 0.5 # Starting volume at 50%
 is_dragging_slider = False # Flag for dragging the knob
 
+# Multiplayer states
+STATE_HOST_GAME = "HOST_GAME"
+STATE_JOIN_GAME = "JOIN_GAME"
+STATE_MULTIPLAYER_WAITING = "MULTIPLAYER_WAITING"
+
+# Multiplayer variables
+multiplayer_manager = MultiplayerManager()
+host_ip_input = ""
+game_id_input = ""
+player_name_input = "Player"
+host_name_input = "Host"
+multiplayer_error = ""
+current_input_field = None
+
+# Setup multiplayer callbacks
+def on_game_started(data):
+    global GAME_STATE, game
+    print("=== GAME STARTED CALLBACK ===")
+    print(f"Data: {data}")
+    game = multiplayer_manager.get_game()
+    if game:
+        print(f"Game object created successfully: {type(game)}")
+        print(f"Current player: {game.state.current_player}")
+        print(f"Players count: {len(game.state.scores)}")
+        GAME_STATE = STATE_GAME_RUNNING
+        print("Switched to GAME_RUNNING state")
+    else:
+        print("ERROR: No game object received!")
+    print("=== END CALLBACK ===")
+
+def on_game_updated(data):
+    global game
+    print("=== GAME UPDATED CALLBACK ===")
+    game = multiplayer_manager.get_game()
+    if game:
+        print(f"Game updated. Current player: {game.state.current_player}")
+        print(f"Scores: {game.state.scores}")
+    print("=== END UPDATE CALLBACK ===")
+
+def on_game_finished(data):
+    global GAME_STATE
+    GAME_STATE = STATE_GAME_OVER
+
+def on_player_joined(data):
+    print(f"Player joined: {data}")
+
+def on_player_left(data):
+    print(f"Player left: {data}")
+
+def on_disconnected(data):
+    global GAME_STATE, game
+    print("Disconnected from multiplayer game")
+    GAME_STATE = STATE_PRE_GAME
+    game = None
+
+multiplayer_manager.set_callback('game_started', on_game_started)
+multiplayer_manager.set_callback('game_updated', on_game_updated)
+multiplayer_manager.set_callback('game_finished', on_game_finished)
+multiplayer_manager.set_callback('player_joined', on_player_joined)
+multiplayer_manager.set_callback('player_left', on_player_left)
+multiplayer_manager.set_callback('disconnected', on_disconnected)
+
 game = None
 is_dragging = False
 drag_pos = (PREVIEW_TILE_X, PREVIEW_TILE_Y)
@@ -81,13 +144,17 @@ running = True
 while running:
     mouse_x, mouse_y = pygame.mouse.get_pos()
     
-    # 1. CHECK FOR GAME END
-    if GAME_STATE == STATE_GAME_RUNNING and game.is_finished():
+    # 1. CHECK FOR MULTIPLAYER GAME START (HOST)
+    if GAME_STATE == STATE_MULTIPLAYER_WAITING and multiplayer_manager.is_host:
+        pass  # Host chỉ chờ players join, không cần check game start
+    
+    # 2. CHECK FOR GAME END
+    if GAME_STATE == STATE_GAME_RUNNING and game and game.is_finished():
         game.state = game.finalise_game_state() # Final score calculation
         GAME_STATE = STATE_GAME_OVER
         continue
 
-    # --- 2. EVENT HANDLING ---
+    # --- 3. EVENT HANDLING ---
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
@@ -98,6 +165,32 @@ while running:
                 GAME_STATE = STATE_PAUSED
             elif GAME_STATE == STATE_PAUSED:
                 GAME_STATE = STATE_GAME_RUNNING
+        
+        # Handle text input for join game screen
+        if event.type == pygame.KEYDOWN and GAME_STATE == STATE_JOIN_GAME and current_input_field:
+            if event.key == pygame.K_BACKSPACE:
+                if current_input_field == 'ip' and host_ip_input:
+                    host_ip_input = host_ip_input[:-1]
+                elif current_input_field == 'id' and game_id_input:
+                    game_id_input = game_id_input[:-1]
+                elif current_input_field == 'name' and player_name_input:
+                    player_name_input = player_name_input[:-1]
+            elif event.unicode.isprintable() and len(event.unicode) == 1:
+                if current_input_field == 'ip' and len(host_ip_input) < 15:
+                    host_ip_input += event.unicode
+                elif current_input_field == 'id' and len(game_id_input) < 6:
+                    game_id_input += event.unicode.upper()
+                elif current_input_field == 'name' and len(player_name_input) < 20:
+                    player_name_input += event.unicode
+        
+        # Handle text input for host game screen
+        if event.type == pygame.KEYDOWN and GAME_STATE == STATE_HOST_GAME and current_input_field == 'host_name':
+            if event.key == pygame.K_BACKSPACE:
+                if host_name_input:
+                    host_name_input = host_name_input[:-1]
+            elif event.unicode.isprintable() and len(event.unicode) == 1:
+                if len(host_name_input) < 20:
+                    host_name_input += event.unicode
         
         # Handle Clicks for Menus/States
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -129,8 +222,12 @@ while running:
                         is_dragging_slider = True
 
             if GAME_STATE == STATE_PRE_GAME:
-                if 'btn_create_game' in player_input_buttons and player_input_buttons['btn_create_game'].collidepoint(mouse_x, mouse_y):
+                if 'btn_single_player' in player_input_buttons and player_input_buttons['btn_single_player'].collidepoint(mouse_x, mouse_y):
                     GAME_STATE = STATE_PLAYER_INPUT
+                elif 'btn_host_game' in player_input_buttons and player_input_buttons['btn_host_game'].collidepoint(mouse_x, mouse_y):
+                    GAME_STATE = STATE_HOST_GAME
+                elif 'btn_join_game' in player_input_buttons and player_input_buttons['btn_join_game'].collidepoint(mouse_x, mouse_y):
+                    GAME_STATE = STATE_JOIN_GAME
             
             elif GAME_STATE == STATE_PLAYER_INPUT:
                 for count, rect in player_input_buttons['player_count_buttons'].items():
@@ -145,8 +242,122 @@ while running:
                     )
                     GAME_STATE = STATE_GAME_RUNNING
             
+            elif GAME_STATE == STATE_HOST_GAME:
+                if 'btn_start_host' in player_input_buttons and player_input_buttons['btn_start_host'].collidepoint(mouse_x, mouse_y):
+                    # Start hosting
+                    if host_name_input.strip():
+                        result = multiplayer_manager.host_game(host_name=host_name_input.strip())
+                        if result['success']:
+                            GAME_STATE = STATE_MULTIPLAYER_WAITING
+                        else:
+                            multiplayer_error = result.get('error', 'Failed to host game')
+                    else:
+                        multiplayer_error = "Please enter your name"
+                elif 'btn_copy' in player_input_buttons and player_input_buttons['btn_copy'].collidepoint(mouse_x, mouse_y):
+                    # Copy connection info to clipboard
+                    connection_info = multiplayer_manager.get_connection_info()
+                    game_id = connection_info.get('game_id', '')
+                    
+                    # Get IP address
+                    import socket
+                    try:
+                        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        s.connect(("8.8.8.8", 80))
+                        host_ip = s.getsockname()[0]
+                        s.close()
+                    except:
+                        host_ip = "localhost"
+                    
+                    copy_text = f"Game ID: {game_id}\nHost IP: {host_ip}\nPort: 5000"
+                    
+                    # Try to copy to clipboard using tkinter
+                    try:
+                        import tkinter as tk
+                        root = tk.Tk()
+                        root.withdraw()  # Hide the window
+                        root.clipboard_clear()
+                        root.clipboard_append(copy_text)
+                        root.update()  # Required to finalize clipboard
+                        root.destroy()
+                        print("Connection info copied to clipboard!")
+                    except:
+                        print("Could not copy to clipboard")
+                        print(f"Connection info:\n{copy_text}")
+                        
+                elif 'host_name_input' in player_input_buttons and player_input_buttons['host_name_input'].collidepoint(mouse_x, mouse_y):
+                    current_input_field = 'host_name'
+                elif 'btn_back' in player_input_buttons and player_input_buttons['btn_back'].collidepoint(mouse_x, mouse_y):
+                    GAME_STATE = STATE_PRE_GAME
+                    multiplayer_error = ""
+                    current_input_field = None
+            
+            elif GAME_STATE == STATE_JOIN_GAME:
+                if 'btn_join' in player_input_buttons and player_input_buttons['btn_join'].collidepoint(mouse_x, mouse_y):
+                    # Try to join game
+                    if host_ip_input and game_id_input and player_name_input:
+                        result = multiplayer_manager.join_game(host_ip_input, game_id_input, player_name_input)
+                        if result['success']:
+                            GAME_STATE = STATE_MULTIPLAYER_WAITING
+                        else:
+                            multiplayer_error = result.get('error', 'Failed to join game')
+                    else:
+                        multiplayer_error = "Please fill in all fields"
+                elif 'btn_back' in player_input_buttons and player_input_buttons['btn_back'].collidepoint(mouse_x, mouse_y):
+                    GAME_STATE = STATE_PRE_GAME
+                    multiplayer_error = ""
+                    host_ip_input = ""
+                    game_id_input = ""
+                    player_name_input = "Player"
+                # Handle input field clicks
+                elif 'ip_input' in player_input_buttons and player_input_buttons['ip_input'].collidepoint(mouse_x, mouse_y):
+                    current_input_field = 'ip'
+                elif 'id_input' in player_input_buttons and player_input_buttons['id_input'].collidepoint(mouse_x, mouse_y):
+                    current_input_field = 'id'
+                elif 'name_input' in player_input_buttons and player_input_buttons['name_input'].collidepoint(mouse_x, mouse_y):
+                    current_input_field = 'name'
+                else:
+                    current_input_field = None
+            
+            elif GAME_STATE == STATE_MULTIPLAYER_WAITING:
+                if 'btn_copy' in player_input_buttons and player_input_buttons['btn_copy'].collidepoint(mouse_x, mouse_y):
+                    # Copy connection info to clipboard
+                    connection_info = multiplayer_manager.get_connection_info()
+                    game_id = connection_info.get('game_id', '')
+                    
+                    # Get IP address
+                    import socket
+                    try:
+                        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        s.connect(("8.8.8.8", 80))
+                        host_ip = s.getsockname()[0]
+                        s.close()
+                    except:
+                        host_ip = "localhost"
+                    
+                    copy_text = f"Game ID: {game_id}\nHost IP: {host_ip}\nPort: 5000"
+                    
+                    # Try to copy to clipboard using tkinter
+                    try:
+                        import tkinter as tk
+                        root = tk.Tk()
+                        root.withdraw()  # Hide the window
+                        root.clipboard_clear()
+                        root.clipboard_append(copy_text)
+                        root.update()  # Required to finalize clipboard
+                        root.destroy()
+                        print("Connection info copied to clipboard!")
+                    except:
+                        print("Could not copy to clipboard")
+                        print(f"Connection info:\n{copy_text}")
+                        
+                elif 'btn_back' in player_input_buttons and player_input_buttons['btn_back'].collidepoint(mouse_x, mouse_y):
+                    multiplayer_manager.disconnect()
+                    GAME_STATE = STATE_PRE_GAME
+                    multiplayer_error = ""
+            
             elif GAME_STATE == STATE_GAME_OVER:
                 if 'btn_menu' in pause_buttons and pause_buttons['btn_menu'].collidepoint(mouse_x, mouse_y):
+                    multiplayer_manager.disconnect()
                     GAME_STATE = STATE_PRE_GAME
                     game = None
                     is_dragging = False
@@ -160,8 +371,22 @@ while running:
             if GAME_STATE == STATE_GAME_RUNNING and is_dragging:
                 is_dragging = False
                 if snap_action is not None:
-                    game.step(game.get_current_player(), snap_action)
-                    snap_action = None 
+                    if multiplayer_manager.is_connected and not multiplayer_manager.is_my_turn():
+                        print("Not your turn!")
+                    elif multiplayer_manager.is_host:
+                        print("Host cannot play - you are the server!")
+                    else:
+                        if multiplayer_manager.is_connected:
+                            # Chỉ gửi action, KHÔNG thực hiện local
+                            print("🚨 UI: TILE DRAG END - Sending action to server...")
+                            print(f"🚨 Action ID: {id(snap_action)}")
+                            result = multiplayer_manager.send_action(snap_action)
+                            print(f"🚨 UI: TILE DRAG END - Send result: {result}")
+                        else:
+                            # Single player mode - thực hiện local
+                            print("🚨 UI: TILE DRAG END - Local game")
+                            game.step(game.get_current_player(), snap_action)
+                    snap_action = None
             
         # Continuous movement while dragging (Tile or Slider)
         elif event.type == pygame.MOUSEMOTION:
@@ -208,8 +433,23 @@ while running:
                             dist = math.hypot(mouse_x - center_x, mouse_y - center_y)
 
                             if dist <= (size / 2) + 6:
-                                game.step(game.get_current_player(), action)
-                                break
+                                # Check if multiplayer and if it's our turn
+                                  if multiplayer_manager.is_connected and not multiplayer_manager.is_my_turn():
+                                      pass
+                                  elif multiplayer_manager.is_host:
+                                      print("Host cannot play - you are the server!")
+                                  else:
+                                      if multiplayer_manager.is_connected:
+                                          # Chỉ gửi action, KHÔNG thực hiện local
+                                          print("🚨 UI: MEEPLE CLICK - Sending action to server...")
+                                          print(f"🚨 Action ID: {id(action)}")
+                                          result = multiplayer_manager.send_action(action)
+                                          print(f"🚨 UI: MEEPLE CLICK - Send result: {result}")
+                                      else:
+                                          # Single player mode
+                                          print("🚨 UI: MEEPLE CLICK - Local game")
+                                          game.step(game.get_current_player(), action)
+                                  break
                 
                 # Tile Drag Start Logic
                 elif "MEEP" not in current_phase and game.state.next_tile is not None:
@@ -231,18 +471,65 @@ while running:
 
             # Key Down - Pass Meeple (P) 
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_p:
-                 if "MEEP" in current_phase or current_phase == "ABBOT":
+                
+                if "MEEP" in current_phase or current_phase == "ABBOT":
                     possible_actions = game.get_possible_actions()
+                    
                     # Pass Meeple/Abbot action
-                    for action in possible_actions:
-                        if isinstance(action, MeepleAction) and action.coordinate_with_side.side is None:
-                            game.step(game.get_current_player(), action)
+                    for i, action in enumerate(possible_actions):
+                        
+                        # Check for PassAction directly
+                        if type(action).__name__ == 'PassAction':
+                            if multiplayer_manager.is_connected and not multiplayer_manager.is_my_turn():
+                                pass
+                            elif multiplayer_manager.is_host:
+                                print("Host cannot play - you are the server!")
+                            else:
+                                if multiplayer_manager.is_connected:
+                                    # Chỉ gửi action, KHÔNG thực hiện local
+                                    print("🚨 UI: PASS ACTION (P key) - Sending to server...")
+                                    print(f"🚨 Action ID: {id(action)}")
+                                    result = multiplayer_manager.send_action(action)
+                                    print(f"🚨 UI: PASS ACTION (P key) - Send result: {result}")
+                                else:
+                                    # Single player mode
+                                    print("🚨 UI: PASS ACTION (P key) - Local game")
+                                    game.step(game.get_current_player(), action)
+                            break
+                        elif isinstance(action, MeepleAction) and action.coordinate_with_side.side is None:
+                            if multiplayer_manager.is_connected and not multiplayer_manager.is_my_turn():
+                                pass
+                            elif multiplayer_manager.is_host:
+                                print("Host cannot play - you are the server!")
+                            else:
+                                if multiplayer_manager.is_connected:
+                                    # Chỉ gửi action, KHÔNG thực hiện local  
+                                    print("🚨 UI: MEEPLE PASS ACTION (P key) - Sending to server...")
+                                    print(f"🚨 Action ID: {id(action)}")
+                                    result = multiplayer_manager.send_action(action)
+                                    print(f"🚨 UI: MEEPLE PASS ACTION (P key) - Send result: {result}")
+                                else:
+                                    # Single player mode
+                                    print("🚨 UI: MEEPLE PASS ACTION (P key) - Local game")
+                                    game.step(game.get_current_player(), action)
                             break
                         elif isinstance(action, TileAction) and current_phase == "ABBOT":
-                             # This is the "no action" step for the abbot phase
                              if action.coordinate is None:
-                                game.step(game.get_current_player(), action)
+                                if multiplayer_manager.is_connected and not multiplayer_manager.is_my_turn():
+                                    print(">>> P KEY: Not your turn!")
+                                elif multiplayer_manager.is_host:
+                                    print("Host cannot play - you are the server!")
+                                else:
+                                    if multiplayer_manager.is_connected:
+                                        # Chỉ gửi action, KHÔNG thực hiện local
+                                        print(">>> Sending abbot pass action to server, waiting for response...")
+                                        result = multiplayer_manager.send_action(action)
+                                    else:
+                                        # Single player mode
+                                        game.step(game.get_current_player(), action)
                                 break
+                else:
+                    print(f">>> P KEY: Not in meeple/abbot phase - ignoring P key")
                         
     # --- 3. GAME LOGIC (Drag/Snap Calculations) ---
     snap_action = None 
@@ -288,6 +575,53 @@ while running:
         
     elif GAME_STATE == STATE_PLAYER_INPUT:
         player_input_buttons = draw_player_input_screen(window, font, (mouse_x, mouse_y), selected_player_count, wood_texture)
+    
+    elif GAME_STATE == STATE_HOST_GAME:
+        connection_info = multiplayer_manager.get_connection_info()
+        game_id = connection_info.get('game_id')
+        port = connection_info.get('port', 5000)
+        connected_players = connection_info.get('connected_players', 0)
+        player_names = connection_info.get('player_names', [])
+        
+        player_input_buttons = draw_host_game_screen(
+            window, font, (mouse_x, mouse_y), wood_texture, 
+            game_id, port, False, connected_players, player_names, host_name_input
+        )
+        
+        # Display error if any
+        if multiplayer_error:
+            error_surf = font.render(multiplayer_error, True, (255, 0, 0))
+            window.blit(error_surf, (WINDOW_WIDTH // 2 - error_surf.get_width() // 2, WINDOW_HEIGHT - 150))
+    
+    elif GAME_STATE == STATE_JOIN_GAME:
+        player_input_buttons = draw_join_game_screen(window, font, (mouse_x, mouse_y), wood_texture, 
+                                                   host_ip_input, game_id_input, player_name_input, multiplayer_error)
+    
+    elif GAME_STATE == STATE_MULTIPLAYER_WAITING:
+        connection_info = multiplayer_manager.get_connection_info()
+        if connection_info.get('is_host'):
+            game_id = connection_info.get('game_id')
+            port = connection_info.get('port', 5000)
+            waiting = not connection_info.get('game_started', False)
+            connected_players = connection_info.get('connected_players', 0)
+            player_names = connection_info.get('player_names', [])
+            
+            player_input_buttons = draw_host_game_screen(
+                window, font, (mouse_x, mouse_y), wood_texture, 
+                game_id, port, waiting, connected_players, player_names, host_name_input
+            )
+        else:
+            window.blit(wood_texture, (0, 0))
+            wait_text = "Waiting for game to start..."
+            wait_surf = font.render(wait_text, True, TEXT_COLOR)
+            window.blit(wait_surf, (WINDOW_WIDTH // 2 - wait_surf.get_width() // 2, WINDOW_HEIGHT // 2))
+            
+            btn_back = pygame.Rect(0, 0, 150, 50)
+            btn_back.center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 100)
+            is_hovered_back = btn_back.collidepoint(mouse_x, mouse_y)
+            from ui_manager import draw_button
+            draw_button(window, font, "Back", btn_back, is_hovered_back)
+            player_input_buttons = {'btn_back': btn_back}
         
     elif GAME_STATE == STATE_GAME_RUNNING and game is not None:
         draw_board(window, font, game.state, drag_pos, game, wood_texture, phase_name_for_state, ghost_surface) 

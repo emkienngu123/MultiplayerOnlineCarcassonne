@@ -313,7 +313,8 @@ class NetworkServer:
             'tiles_remaining': len(state.deck),
             'next_tile': self._serialize_tile(state.next_tile) if state.next_tile else None,
             'board': self._serialize_board(state.board),
-            'placed_meeples': self._serialize_placed_meeples(state.placed_meeples)
+            'placed_meeples': self._serialize_placed_meeples(state.placed_meeples),
+            'last_tile_action': self._serialize_action_data(state.last_tile_action) if state.last_tile_action else None
         }
         
         print(f"Serialized game state:")
@@ -323,6 +324,7 @@ class NetworkServer:
         print(f"    Tiles remaining: {serialized_state['tiles_remaining']}")
         print(f"    Board tiles: {board_tiles}")
         print(f"    Next tile: {'Yes' if serialized_state['next_tile'] else 'None'}")
+        print(f"    Last tile action: {'Yes' if serialized_state['last_tile_action'] else 'None'}")
         
         return serialized_state
     
@@ -386,6 +388,23 @@ class NetworkServer:
     def _serialize_placed_meeples(self, placed_meeples) -> List[List[Dict]]:
 
         return []
+
+    def _serialize_action_data(self, action) -> Dict[str, Any]:
+        """Serialize action object to dict using pickle/base64"""
+        import pickle
+        import base64
+        
+        try:
+            pickled_action = pickle.dumps(action)
+            encoded_action = base64.b64encode(pickled_action).decode('utf-8')
+            
+            return {
+                'type': type(action).__name__,
+                'pickled_data': encoded_action
+            }
+        except Exception as e:
+            print(f"Error serializing action: {e}")
+            return None
     
     def _deserialize_action(self, action_data: Dict[str, Any]):
         import pickle

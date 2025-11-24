@@ -5,15 +5,17 @@ from resources import (
 )
 from wingedsheep.carcassonne.objects.meeple_type import MeepleType
 
-def draw_ghosts(window, game_state, game, phase_name_func, ghost_surface):
+def draw_ghosts(window, game_state, game, phase_name_func, ghost_surface, is_my_turn=True):
     """Draws tile and meeple placement ghosts."""
+    if not is_my_turn:
+        return
+
     name = phase_name_func(game_state)
     next_tile = game_state.next_tile
     possible_actions = game.get_possible_actions()
 
     if "MEEP" in name:
-        # ... (Meeple ghost drawing logic remains the same) ...
-        # ... (This block handles meeple placement and is not the issue) ...
+        # Meeple ghost drawing logic
         from resources import big_meeple_position_offsets, meeple_position_offsets
         for action in possible_actions:
             if hasattr(action , 'coordinate_with_side') and hasattr(action , 'meeple_type'):
@@ -28,28 +30,50 @@ def draw_ghosts(window, game_state, game, phase_name_func, ghost_surface):
                 # APPLY CENTER OFFSET
                 window.blit(meep_img, (ghost_x_px + CENTER_OFFSET_X - meep_img.get_width() / 2, ghost_y_px + CENTER_OFFSET_Y - meep_img.get_height() / 2))
     else:
-        # FIX: Tile Ghost Logic - Draw for ANY valid coordinate, regardless of current rotation.
-        if next_tile is None: return
+        # Tile Ghost Logic - Draw only for valid placements at the CURRENT rotation
+        if next_tile is None: 
+            return
 
-        # Set to track coordinates where a ghost has been drawn to prevent duplicates
-        drawn_coordinates = set()
-
+        # Get the current rotation of the tile
+        current_rotation = next_tile.turns
+        
+        # Debug: count valid positions and show details for first few
+        valid_positions = []
+        debug_count = 0
         for action in possible_actions:
-            # Check if the action is a TileAction (has a coordinate)
-            if hasattr(action, 'coordinate'):
-                coord_tuple = (action.coordinate.column, action.coordinate.row)
-
-                if coord_tuple not in drawn_coordinates:
-                    drawn_coordinates.add(coord_tuple)
+            # Check if the action is a TileAction with matching rotation
+            if (hasattr(action, 'coordinate') and 
+                hasattr(action, 'tile_rotations') and 
+                action.tile_rotations == current_rotation):
+                valid_positions.append((action.coordinate.column, action.coordinate.row))
+                
+                # Debug: print details for first 3 positions
+                if debug_count < 3:
+                    row, col = action.coordinate.row, action.coordinate.column
+                    print(f"\nDEBUG Ghost #{debug_count + 1} at ({col}, {row}), rotation={current_rotation}")
+                    print(f"  Tile type: {next_tile.tile_type if hasattr(next_tile, 'tile_type') else 'unknown'}")
                     
-                    ghost_x_px = action.coordinate.column * TILE_SIZE
-                    ghost_y_px = action.coordinate.row * TILE_SIZE
+                    # Show neighboring tiles
+                    top = game_state.get_tile(row - 1, col)
+                    bottom = game_state.get_tile(row + 1, col)
+                    left = game_state.get_tile(row, col - 1)
+                    right = game_state.get_tile(row, col + 1)
                     
-                    # APPLY CENTER OFFSET
-                    window.blit(ghost_surface, (ghost_x_px + CENTER_OFFSET_X, ghost_y_px + CENTER_OFFSET_Y))
+                    print(f"  Neighbors: T={top is not None}, B={bottom is not None}, L={left is not None}, R={right is not None}")
+                    debug_count += 1
+                
+                ghost_x_px = action.coordinate.column * TILE_SIZE
+                ghost_y_px = action.coordinate.row * TILE_SIZE
+                
+                # APPLY CENTER OFFSET
+                window.blit(ghost_surface, (ghost_x_px + CENTER_OFFSET_X, ghost_y_px + CENTER_OFFSET_Y))
+        
+        # Summary output
+        if valid_positions:
+            print(f"DEBUG: Total {len(valid_positions)} ghost positions for rotation {current_rotation}")
 
 def draw_placed_meeples(window, game_state):
-# ... (function body remains the same) ...
+    """Draws all placed meeples on the board."""
     from resources import big_meeple_position_offsets, meeple_position_offsets
     for player, placed_meeples in enumerate(game_state.placed_meeples):
         for meeple_position in placed_meeples:
@@ -70,7 +94,7 @@ def draw_placed_meeples(window, game_state):
             window.blit(meep_img, (x, y))
 
 
-def draw_board(window, font, game_state, drag_pos, game, wood_texture, phase_name_func, ghost_surface):
+def draw_board(window, font, game_state, drag_pos, game, wood_texture, phase_name_func, ghost_surface, is_my_turn=True):
     """Main function to draw the game board, tiles, dragging tile, ghosts, and meeples."""
     window.blit(wood_texture, (0, 0))
 
@@ -83,7 +107,7 @@ def draw_board(window, font, game_state, drag_pos, game, wood_texture, phase_nam
                 window.blit(img, (c * TILE_SIZE + CENTER_OFFSET_X, r * TILE_SIZE + CENTER_OFFSET_Y))
 
     # 2. Draw Ghosts, Placed Meeples (Draws the translucent green squares and placed meeples)
-    draw_ghosts(window, game_state, game, phase_name_func, ghost_surface)
+    draw_ghosts(window, game_state, game, phase_name_func, ghost_surface, is_my_turn)
     draw_placed_meeples(window, game_state)
     
     # 3. Draw Dragging Tile (Drawn last so it overlaps everything else)

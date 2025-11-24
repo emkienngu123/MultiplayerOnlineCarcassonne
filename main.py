@@ -136,8 +136,8 @@ drag_pos = (PREVIEW_TILE_X, PREVIEW_TILE_Y)
 snap_action = None 
 
 # --- RUNNING LOOP ---
-play_music() 
-pygame.mixer.music.set_volume(music_volume) 
+#play_music() 
+# pygame.mixer.music.set_volume(music_volume) 
 clock = pygame.time.Clock()
 running = True
 
@@ -496,40 +496,6 @@ while running:
                                     print("🚨 UI: PASS ACTION (P key) - Local game")
                                     game.step(game.get_current_player(), action)
                             break
-                        elif isinstance(action, MeepleAction) and action.coordinate_with_side.side is None:
-                            if multiplayer_manager.is_connected and not multiplayer_manager.is_my_turn():
-                                pass
-                            elif multiplayer_manager.is_host:
-                                print("Host cannot play - you are the server!")
-                            else:
-                                if multiplayer_manager.is_connected:
-                                    # Chỉ gửi action, KHÔNG thực hiện local  
-                                    print("🚨 UI: MEEPLE PASS ACTION (P key) - Sending to server...")
-                                    print(f"🚨 Action ID: {id(action)}")
-                                    result = multiplayer_manager.send_action(action)
-                                    print(f"🚨 UI: MEEPLE PASS ACTION (P key) - Send result: {result}")
-                                else:
-                                    # Single player mode
-                                    print("🚨 UI: MEEPLE PASS ACTION (P key) - Local game")
-                                    game.step(game.get_current_player(), action)
-                            break
-                        elif isinstance(action, TileAction) and current_phase == "ABBOT":
-                             if action.coordinate is None:
-                                if multiplayer_manager.is_connected and not multiplayer_manager.is_my_turn():
-                                    print(">>> P KEY: Not your turn!")
-                                elif multiplayer_manager.is_host:
-                                    print("Host cannot play - you are the server!")
-                                else:
-                                    if multiplayer_manager.is_connected:
-                                        # Chỉ gửi action, KHÔNG thực hiện local
-                                        print(">>> Sending abbot pass action to server, waiting for response...")
-                                        result = multiplayer_manager.send_action(action)
-                                    else:
-                                        # Single player mode
-                                        game.step(game.get_current_player(), action)
-                                break
-                else:
-                    print(f">>> P KEY: Not in meeple/abbot phase - ignoring P key")
                         
     # --- 3. GAME LOGIC (Drag/Snap Calculations) ---
     snap_action = None 
@@ -624,7 +590,8 @@ while running:
             player_input_buttons = {'btn_back': btn_back}
         
     elif GAME_STATE == STATE_GAME_RUNNING and game is not None:
-        draw_board(window, font, game.state, drag_pos, game, wood_texture, phase_name_for_state, ghost_surface) 
+        is_turn = multiplayer_manager.is_my_turn() if multiplayer_manager.is_connected else True
+        draw_board(window, font, game.state, drag_pos, game, wood_texture, phase_name_for_state, ghost_surface, is_my_turn=is_turn) 
         draw_player_info(window, font, game.state)
         draw_phase_indicator(window, font, game.state, phase_name_for_state)
         
@@ -634,7 +601,8 @@ while running:
         draw_tiles_remaining(window, font, game.state) 
     
     elif GAME_STATE == STATE_PAUSED:
-        draw_board(window, font, game.state, drag_pos, game, wood_texture, phase_name_for_state, ghost_surface) 
+        is_turn = multiplayer_manager.is_my_turn() if multiplayer_manager.is_connected else True
+        draw_board(window, font, game.state, drag_pos, game, wood_texture, phase_name_for_state, ghost_surface, is_my_turn=is_turn) 
         draw_player_info(window, font, game.state)
         draw_tiles_remaining(window, font, game.state)
         pause_buttons = draw_pause_menu(window, font, (mouse_x, mouse_y), music_volume)

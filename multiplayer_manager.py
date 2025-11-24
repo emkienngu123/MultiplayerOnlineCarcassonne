@@ -6,6 +6,7 @@ from network_client import NetworkClient
 from wingedsheep.carcassonne.carcassonne_game import CarcassonneGame
 from wingedsheep.carcassonne.tile_sets.tile_sets import TileSet
 from wingedsheep.carcassonne.tile_sets.supplementary_rules import SupplementaryRule
+from wingedsheep.carcassonne.objects.game_phase import GamePhase
 
 class MultiplayerManager:
     
@@ -132,6 +133,13 @@ class MultiplayerManager:
                 if 'phase' in game_state:
                     phase_str = game_state['phase']
                     print(f">>> Updating phase to: {phase_str}")
+                    # Convert string back to Enum
+                    if phase_str == "tiles":
+                        self.game.state.phase = GamePhase.TILES
+                    elif phase_str == "meeples":
+                        self.game.state.phase = GamePhase.MEEPLES
+                    else:
+                        print(f"Warning: Unknown phase string: {phase_str}")
                 
                 # Cập nhật next_tile - QUAN TRỌNG!
                 if 'next_tile' in game_state:
@@ -152,6 +160,27 @@ class MultiplayerManager:
                     board_data = game_state['board']
                     print(f"CLIENT: Received board update with {len(board_data)} rows")
                     self._deserialize_board(board_data)
+                
+                # Cập nhật last_tile_action - QUAN TRỌNG CHO MEEPLE PHASE!
+                if 'last_tile_action' in game_state:
+                    action_data = game_state['last_tile_action']
+                    if action_data:
+                        print(f"CLIENT: Updating last_tile_action... Data: {action_data.get('type')}")
+                        last_action = self._deserialize_action(action_data)
+                        if last_action:
+                            self.game.state.last_tile_action = last_action
+                            print(f"CLIENT: last_tile_action updated: {type(last_action).__name__}")
+                            if hasattr(last_action, 'tile'):
+                                print(f"CLIENT: last_tile_action.tile: {last_action.tile}")
+                            else:
+                                print("CLIENT: last_tile_action HAS NO TILE ATTRIBUTE!")
+                        else:
+                            print("CLIENT: Failed to deserialize last_tile_action")
+                    else:
+                        print("CLIENT: last_tile_action data is None")
+                        self.game.state.last_tile_action = None
+                else:
+                    print("CLIENT: 'last_tile_action' key missing in game_state")
                 
                 # Cập nhật tiles remaining
                 if 'tiles_remaining' in game_state:
@@ -333,6 +362,28 @@ class MultiplayerManager:
         except Exception as e:
             print(f">>> Error serializing action with pickle: {e}")
             return {'type': type(action).__name__, 'error': 'serialization_failed'}
+
+    def _deserialize_action(self, action_data: Dict[str, Any]):
+        """Deserialize action from dict using pickle/base64"""
+        import pickle
+        import base64
+        
+        action_type = action_data.get('type')
+        # print(f">>> CLIENT: Deserializing action type: {action_type}")
+        
+        if 'pickled_data' in action_data:
+            try:
+                encoded_data = action_data['pickled_data']
+                pickled_data = base64.b64decode(encoded_data.encode('utf-8'))
+                action = pickle.loads(pickled_data)
+                # print(f">>> CLIENT: Successfully deserialized with pickle: {type(action).__name__}")
+                return action
+            except Exception as e:
+                print(f">>> CLIENT: Error deserializing with pickle: {e}")
+                return None
+        
+        print(f"No pickled data found for action type: {action_type}")
+        return None
     
     def get_game(self) -> Optional[CarcassonneGame]:
         return self.game

@@ -352,15 +352,37 @@ class NetworkServer:
         if hasattr(tile, 'image'):
             tile_data['image'] = tile.image
             
-        # Thêm các thuộc tính khác
+        # Thêm các thuộc tính khác (Serialize properly!)
         if hasattr(tile, 'road'):
-            tile_data['road'] = str(tile.road) if tile.road else None
+            tile_data['road'] = [c.to_json() for c in tile.road] if tile.road else []
+            
         if hasattr(tile, 'city'):
-            tile_data['city'] = str(tile.city) if tile.city else None
+            # City is List[List[Side]]
+            tile_data['city'] = [[s.to_json() for s in city_part] for city_part in tile.city] if tile.city else []
+            
         if hasattr(tile, 'grass'):
-            tile_data['grass'] = str(tile.grass) if tile.grass else None
+            tile_data['grass'] = [s.to_json() for s in tile.grass] if tile.grass else []
+            
         if hasattr(tile, 'river'):
-            tile_data['river'] = str(tile.river) if tile.river else None
+            tile_data['river'] = [c.to_json() for c in tile.river] if tile.river else []
+            
+        if hasattr(tile, 'inn'):
+            tile_data['inn'] = [s.to_json() for s in tile.inn] if tile.inn else []
+            
+        if hasattr(tile, 'unplayable_sides'):
+            tile_data['unplayable_sides'] = [s.to_json() for s in tile.unplayable_sides] if tile.unplayable_sides else []
+            
+        if hasattr(tile, 'shield'):
+            tile_data['shield'] = tile.shield
+            
+        if hasattr(tile, 'chapel'):
+            tile_data['chapel'] = tile.chapel
+            
+        if hasattr(tile, 'flowers'):
+            tile_data['flowers'] = tile.flowers
+            
+        if hasattr(tile, 'cathedral'):
+            tile_data['cathedral'] = tile.cathedral
             
         print(f"    Serialized tile: ID={tile_data['id']}, turns={tile_data['turns']}, desc={tile_data.get('description', 'None')}")
         return tile_data
@@ -386,8 +408,30 @@ class NetworkServer:
         return serialized_board
     
     def _serialize_placed_meeples(self, placed_meeples) -> List[List[Dict]]:
-
-        return []
+        serialized_meeples = []
+        
+        # placed_meeples is a list of lists (one list per player)
+        for player_meeples in placed_meeples:
+            player_serialized = []
+            for meeple_pos in player_meeples:
+                try:
+                    # MeeplePosition has meeple_type and coordinate_with_side
+                    meeple_data = {
+                        'meeple_type': meeple_pos.meeple_type.name, # Enum name (NORMAL, BIG, ABBOT)
+                        'coordinate_with_side': {
+                            'coordinate': {
+                                'row': meeple_pos.coordinate_with_side.coordinate.row,
+                                'column': meeple_pos.coordinate_with_side.coordinate.column
+                            },
+                            'side': meeple_pos.coordinate_with_side.side.name # Enum name (TOP, BOTTOM, etc.)
+                        }
+                    }
+                    player_serialized.append(meeple_data)
+                except Exception as e:
+                    print(f"Error serializing meeple: {e}")
+            serialized_meeples.append(player_serialized)
+            
+        return serialized_meeples
 
     def _serialize_action_data(self, action) -> Dict[str, Any]:
         """Serialize action object to dict using pickle/base64"""

@@ -188,6 +188,14 @@ class MultiplayerManager:
                     print(f">>> Tiles remaining: {tiles_remaining}")
                     # Update deck size if needed
                     
+                # Cập nhật placed_meeples - QUAN TRỌNG!
+                if 'placed_meeples' in game_state:
+                    placed_meeples_data = game_state['placed_meeples']
+                    # print(f"CLIENT: Received placed_meeples data: {placed_meeples_data}")
+                    if placed_meeples_data:
+                        self.game.state.placed_meeples = self._deserialize_placed_meeples(placed_meeples_data)
+                        # print(f"CLIENT: Updated placed_meeples. Count: {[len(p) for p in self.game.state.placed_meeples]}")
+                
                 print(f">>> Game state fully updated. Current player: {self.game.state.current_player}")
                 
             except Exception as e:
@@ -196,62 +204,178 @@ class MultiplayerManager:
                 traceback.print_exc()
         
         self._trigger_callback('game_updated', message)
+
+    def _deserialize_placed_meeples(self, placed_meeples_data):
+        """Deserialize list of list of meeple dicts to MeeplePosition objects"""
+        from wingedsheep.carcassonne.objects.meeple_position import MeeplePosition
+        from wingedsheep.carcassonne.objects.meeple_type import MeepleType
+        from wingedsheep.carcassonne.objects.coordinate_with_side import CoordinateWithSide
+        from wingedsheep.carcassonne.objects.coordinate import Coordinate
+        from wingedsheep.carcassonne.objects.side import Side
+        
+        deserialized_meeples = []
+        
+        for player_meeples_data in placed_meeples_data:
+            player_meeples = []
+            for meeple_data in player_meeples_data:
+                try:
+                    # Get MeepleType
+                    meeple_type_str = meeple_data.get('meeple_type')
+                    meeple_type = MeepleType[meeple_type_str] if meeple_type_str else MeepleType.NORMAL
+                    
+                    # Get CoordinateWithSide
+                    cws_data = meeple_data.get('coordinate_with_side', {})
+                    coord_data = cws_data.get('coordinate', {})
+                    side_str = cws_data.get('side')
+                    
+                    row = coord_data.get('row', 0)
+                    col = coord_data.get('column', 0)
+                    
+                    coordinate = Coordinate(row, col)
+                    side = Side[side_str] if side_str else Side.TOP
+                    
+                    cws = CoordinateWithSide(coordinate, side)
+                    
+                    meeple_pos = MeeplePosition(meeple_type, cws)
+                    player_meeples.append(meeple_pos)
+                    
+                except Exception as e:
+                    print(f"Error deserializing meeple: {e}")
+            
+            deserialized_meeples.append(player_meeples)
+            
+        return deserialized_meeples
     
+    def _str_to_side(self, side_str: str):
+        """Convert string to Side enum"""
+        from wingedsheep.carcassonne.objects.side import Side
+        try:
+            # Handle special cases if needed, but usually it's direct mapping
+            for side in Side:
+                if side.value == side_str:
+                    return side
+            return None
+        except:
+            return None
+
+    def _deserialize_connection(self, conn_data):
+        """Convert dict to Connection object"""
+        from wingedsheep.carcassonne.objects.connection import Connection
+        try:
+            a = self._str_to_side(conn_data.get('a'))
+            b = self._str_to_side(conn_data.get('b'))
+            if a and b:
+                return Connection(a, b)
+            return None
+        except:
+            return None
+
     def _deserialize_tile(self, tile_data):
         """Deserialize tile from server data"""
         try:
             if not tile_data:
                 return None
             
-            print(f"CLIENT: Deserializing tile: {tile_data}")
+            # print(f"CLIENT: Deserializing tile: {tile_data.get('description', 'Unknown')}")
             
             # Import cần thiết
             from wingedsheep.carcassonne.objects.tile import Tile
+            from wingedsheep.carcassonne.objects.farmer_connection import FarmerConnection
             
-            # Thay vì tạo tile rỗng, cần tạo tile với đầy đủ properties
-            # Tạm thời tạo tile cơ bản và copy properties
             tile = Tile()
             
-            # Copy tất cả properties từ server data
+            # Copy basic properties
             if 'turns' in tile_data:
                 tile.turns = tile_data['turns']
-                print(f"CLIENT: Set tile turns to {tile.turns}")
             
             if 'description' in tile_data:
                 tile.description = tile_data['description']
-                print(f"CLIENT: Set tile description to {tile.description}")
                 
             if 'image' in tile_data:
                 tile.image = tile_data['image']
-                print(f"CLIENT: Set tile image to {tile.image}")
             
-            # Copy các thuộc tính game logic
-            for attr in ['road', 'city', 'grass', 'river']:
-                if attr in tile_data and tile_data[attr]:
-                    try:
-                        # Cần deserialize các connection objects nếu có
-                        print(f"CLIENT: Found {attr} data: {tile_data[attr]}")
-                        # TODO: Deserialize connection objects properly
-                    except Exception as e:
-                        print(f"CLIENT: Error setting {attr}: {e}")
+            if 'shield' in tile_data:
+                tile.shield = tile_data['shield']
+                
+            if 'chapel' in tile_data:
+                tile.chapel = tile_data['chapel']
+                
+            if 'flowers' in tile_data:
+                tile.flowers = tile_data['flowers']
+                
+            if 'cathedral' in tile_data:
+                tile.cathedral = tile_data['cathedral']
+
+            # Deserialize complex properties
             
-            print(f"CLIENT: Tile deserialized successfully - desc: {getattr(tile, 'description', 'None')}")
+            # 1. Road (List[Connection])
+            if 'road' in tile_data and tile_data['road']:
+                tile.road = []
+                for conn_data in tile_data['road']:
+                    conn = self._deserialize_connection(conn_data)
+                    if conn:
+                        tile.road.append(conn)
+            
+            # 2. River (List[Connection])
+            if 'river' in tile_data and tile_data['river']:
+                tile.river = []
+                for conn_data in tile_data['river']:
+                    conn = self._deserialize_connection(conn_data)
+                    if conn:
+                        tile.river.append(conn)
+                        
+            # 3. Grass (List[Side])
+            if 'grass' in tile_data and tile_data['grass']:
+                tile.grass = []
+                for side_str in tile_data['grass']:
+                    side = self._str_to_side(side_str)
+                    if side:
+                        tile.grass.append(side)
+                        
+            # 4. City (List[List[Side]])
+            if 'city' in tile_data and tile_data['city']:
+                tile.city = []
+                for city_part in tile_data['city']:
+                    deserialized_part = []
+                    for side_str in city_part:
+                        side = self._str_to_side(side_str)
+                        if side:
+                            deserialized_part.append(side)
+                    if deserialized_part:
+                        tile.city.append(deserialized_part)
+            
+            # 5. Inn (List[Side])
+            if 'inn' in tile_data and tile_data['inn']:
+                tile.inn = []
+                for side_str in tile_data['inn']:
+                    side = self._str_to_side(side_str)
+                    if side:
+                        tile.inn.append(side)
+                        
+            # 6. Unplayable Sides (List[Side])
+            if 'unplayable_sides' in tile_data and tile_data['unplayable_sides']:
+                tile.unplayable_sides = []
+                for side_str in tile_data['unplayable_sides']:
+                    side = self._str_to_side(side_str)
+                    if side:
+                        tile.unplayable_sides.append(side)
+
+            # 7. Farms (List[FarmerConnection]) - Complex!
+            # FarmerConnection has 'tile_field' (int) and 'farmer_positions' (List[FarmerPosition])
+            # FarmerPosition has 'center' (Side), 'left' (Side), 'right' (Side)
+            # For now, we might skip deep farmer deserialization if not strictly needed for placement validation
+            # Placement validation mainly uses grass, city, road, river. 
+            # Farmers are for scoring/meeple placement.
+            # TODO: Implement full farmer deserialization if needed for meeple placement
+            
+            # print(f"CLIENT: Tile deserialized successfully - desc: {getattr(tile, 'description', 'None')}")
             return tile
             
         except Exception as e:
             print(f"CLIENT: Error deserializing tile: {e}")
             import traceback
             traceback.print_exc()
-            
-            # Fallback: Tạo tile cơ bản
-            try:
-                from wingedsheep.carcassonne.objects.tile import Tile
-                basic_tile = Tile()
-                basic_tile.turns = tile_data.get('turns', 0)
-                print(f"CLIENT: Created fallback tile")
-                return basic_tile
-            except:
-                return None
+            return None
     
     def _deserialize_board(self, board_data):
         """Deserialize board from server data"""

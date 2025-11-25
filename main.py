@@ -1,5 +1,6 @@
 # main.py
 
+from wingedsheep.carcassonne.ai.random_ai import RandomAI
 import pygame
 import math
 import os
@@ -64,6 +65,7 @@ ghost_surface.fill((100, 200, 100, 100))
 # --- GAME STATE VARIABLES ---
 GAME_STATE = STATE_PRE_GAME 
 selected_player_count = 2
+selected_difficulty = "Easy"
 player_input_buttons = {}
 pause_buttons = {}
 music_volume = 0.5 # Starting volume at 50%
@@ -242,6 +244,10 @@ while running:
                 for count, rect in player_input_buttons['player_count_buttons'].items():
                     if rect.collidepoint(mouse_x, mouse_y):
                         selected_player_count = count
+                
+                for mode , rect in player_input_buttons['difficulty_buttons'].items():
+                    if rect.collidepoint(mouse_x, mouse_y):
+                        selected_difficulty = mode
                         
                 if 'btn_begin_game' in player_input_buttons and player_input_buttons['btn_begin_game'].collidepoint(mouse_x, mouse_y):
                     game = CarcassonneGame(
@@ -250,8 +256,14 @@ while running:
                         supplementary_rules=[SupplementaryRule.ABBOTS, SupplementaryRule.FARMERS]
                     )
 
+                    if selected_difficulty == 'Easy':
+                        num_sims = 1
+                    elif selected_difficulty == 'Medium':
+                        num_sims = 5
+                    elif selected_difficulty == 'Hard':
+                        num_sims = 10
                     for i in range(selected_player_count):
-                        mcts_agents.append(SimpleMCTS(player_id=i , simulations=10 , max_rollout_depth=50 , exploration_factor=1.4))
+                        mcts_agents.append(SimpleMCTS(player_id=i , simulations=num_sims , max_rollout_depth=50 , exploration_factor=1.4))
 
                     GAME_STATE = STATE_GAME_RUNNING
             
@@ -553,7 +565,7 @@ while running:
         player_input_buttons = draw_pre_game_screen(window, font, (mouse_x, mouse_y), wood_texture)
         
     elif GAME_STATE == STATE_PLAYER_INPUT:
-        player_input_buttons = draw_player_input_screen(window, font, (mouse_x, mouse_y), selected_player_count, wood_texture)
+        player_input_buttons = draw_player_input_screen(window, font, (mouse_x, mouse_y), selected_player_count, wood_texture , selected_difficulty)
     
     elif GAME_STATE == STATE_HOST_GAME:
         connection_info = multiplayer_manager.get_connection_info()

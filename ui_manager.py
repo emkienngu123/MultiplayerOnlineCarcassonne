@@ -86,13 +86,15 @@ def draw_pre_game_screen(window, font, mouse_pos, wood_texture):
         'btn_join_game': btn_join
     }
 
-def draw_player_input_screen(window, font, mouse_pos, selected_player_count, wood_texture):
-    """Draws the screen to select the number of players."""
+def draw_player_input_screen(window, font, mouse_pos, selected_player_count, wood_texture, selected_difficulty):
+    """Draws the screen to select players and difficulty."""
     window.blit(wood_texture, (0, 0))
     
+    # Title
     text_surf = font.render("Select the number of players", True, TEXT_COLOR)
     window.blit(text_surf, (WINDOW_WIDTH // 2 - text_surf.get_width() // 2, WINDOW_HEIGHT // 2 - 100))
     
+    # --- Player Count Buttons ---
     player_options = [2, 3, 4, 5]
     option_width = 50
     option_height = 40
@@ -120,12 +122,46 @@ def draw_player_input_screen(window, font, mouse_pos, selected_player_count, woo
         
         player_count_buttons[count] = option_rect
 
+    # --- Difficulty Buttons ---
+    difficulty_options = ["Easy", "Medium", "Hard"]
+    diff_width = 120
+    diff_height = 50
+    total_diff_width = len(difficulty_options) * diff_width + (len(difficulty_options) - 1) * 15
+    start_diff_x = WINDOW_WIDTH // 2 - total_diff_width // 2
+    diff_y = WINDOW_HEIGHT // 2 + 10
+
+    difficulty_buttons = {}
+
+    for i, diff in enumerate(difficulty_options):
+        x = start_diff_x + i * (diff_width + 15)
+
+        diff_rect = pygame.Rect(x, diff_y, diff_width, diff_height)
+        is_current = (diff == selected_difficulty)
+        is_hovered = diff_rect.collidepoint(mouse_pos)
+
+        color = (0, 120, 180) if is_current else (60, 60, 60)
+        if is_hovered and not is_current:
+            color = (90, 90, 90)
+
+        pygame.draw.rect(window, color, diff_rect, border_radius=6)
+
+        text_surf = font.render(diff, True, TEXT_COLOR)
+        text_rect = text_surf.get_rect(center=diff_rect.center)
+        window.blit(text_surf, text_rect)
+
+        difficulty_buttons[diff] = diff_rect
+
+    # --- Begin Game Button ---
     btn_rect = pygame.Rect(0, 0, 250, 60)
-    btn_rect.center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 80)
+    btn_rect.center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 100)
     is_hovered = btn_rect.collidepoint(mouse_pos)
     draw_button(window, font, "Begin Game", btn_rect, is_hovered)
     
-    return {'player_count_buttons': player_count_buttons, 'btn_begin_game': btn_rect}
+    return {
+        'player_count_buttons': player_count_buttons,
+        'difficulty_buttons': difficulty_buttons,
+        'btn_begin_game': btn_rect
+    }
 
 
 def draw_pause_menu(window, font, mouse_pos, music_volume):

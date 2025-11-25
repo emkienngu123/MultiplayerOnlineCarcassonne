@@ -1,14 +1,16 @@
+from build.lib.wingedsheep.carcassonne.utils.action_util import ActionUtil
 import random
 import time
-from wingedsheep.carcassonne.carcassonne_game import CarcassonneGame
+from wingedsheep.carcassonne.carcassonne_game_state import CarcassonneGameState
 from wingedsheep.carcassonne.objects.actions.action import Action
+
 
 class RandomAI:
     def __init__(self):
         pass
 
-    def get_move(self, game: CarcassonneGame) -> Action:
-        possible_actions = game.get_possible_actions()
+    def get_action(self, gamestate: CarcassonneGameState) -> Action:
+        possible_actions = ActionUtil.get_possible_actions(gamestate)
         if not possible_actions:
             return None
         

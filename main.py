@@ -10,6 +10,7 @@ from wingedsheep.carcassonne.tile_sets.supplementary_rules import SupplementaryR
 from wingedsheep.carcassonne.objects.meeple_type import MeepleType
 from wingedsheep.carcassonne.objects.actions.meeple_action import MeepleAction
 from wingedsheep.carcassonne.objects.actions.tile_action import TileAction
+from wingedsheep.carcassonne.ai.MCTS import SimpleMCTS 
 
 # --- Import all shared CONSTANTS from resources.py ---
 from resources import (
@@ -131,6 +132,7 @@ multiplayer_manager.set_callback('player_left', on_player_left)
 multiplayer_manager.set_callback('disconnected', on_disconnected)
 
 game = None
+mcts_agents = []
 is_dragging = False
 drag_pos = (PREVIEW_TILE_X, PREVIEW_TILE_Y)
 snap_action = None 
@@ -153,8 +155,15 @@ while running:
         game.state = game.finalise_game_state() # Final score calculation
         GAME_STATE = STATE_GAME_OVER
         continue
-
+    
+    if GAME_STATE == STATE_GAME_RUNNING and game and game.get_current_player() != 0 and not multiplayer_manager.is_connected and not multiplayer_manager.is_host:
+        possible_actions = game.get_possible_actions()
+        if possible_actions:
+            action_to_take = mcts_agents[game.get_current_player()].get_action(game.state)
+            game.step(game.get_current_player(), action_to_take)
+            continue
     # --- 3. EVENT HANDLING ---
+
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
@@ -240,6 +249,10 @@ while running:
                         tile_sets=[TileSet.BASE, TileSet.THE_RIVER, TileSet.INNS_AND_CATHEDRALS],
                         supplementary_rules=[SupplementaryRule.ABBOTS, SupplementaryRule.FARMERS]
                     )
+
+                    for i in range(selected_player_count):
+                        mcts_agents.append(SimpleMCTS(player_id=i , simulations=10 , max_rollout_depth=50 , exploration_factor=1.4))
+
                     GAME_STATE = STATE_GAME_RUNNING
             
             elif GAME_STATE == STATE_HOST_GAME:

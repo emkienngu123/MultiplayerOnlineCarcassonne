@@ -65,8 +65,13 @@ def draw_ghosts(window, game_state, game, phase_name_func, ghost_surface, is_my_
 def draw_placed_meeples(window, game_state):
     """Draws all placed meeples on the board."""
     from resources import big_meeple_position_offsets, meeple_position_offsets
+    
+    total_meeples = sum(len(player_meeples) for player_meeples in game_state.placed_meeples)
+    if total_meeples > 0:
+        print(f"DRAW: Drawing {total_meeples} total meeples")
+    
     for player, placed_meeples in enumerate(game_state.placed_meeples):
-        for meeple_position in placed_meeples:
+        for meeple_idx, meeple_position in enumerate(placed_meeples):
             meep_type = meeple_position.meeple_type
             is_big = (meep_type == MeepleType.BIG)
             offsets = big_meeple_position_offsets if is_big else meeple_position_offsets
@@ -77,10 +82,15 @@ def draw_placed_meeples(window, game_state):
             
             meep_img = get_meeple_image(player, meep_type, is_ghost=False)
             
+            if meep_img is None:
+                print(f"DRAW: ERROR - No image for player {player} meeple type {meep_type}")
+                continue
+            
             # Calculate final screen position
             x = col * TILE_SIZE + CENTER_OFFSET_X + offsets[side][0] - (meep_img.get_width() / 2)
             y = row * TILE_SIZE + CENTER_OFFSET_Y + offsets[side][1] - (meep_img.get_height() / 2)
             
+            print(f"DRAW: Player {player} Meeple at [{row},{col}] {side.name}")
             window.blit(meep_img, (x, y))
 
 

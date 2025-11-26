@@ -191,10 +191,21 @@ class MultiplayerManager:
                 # Cập nhật placed_meeples - QUAN TRỌNG!
                 if 'placed_meeples' in game_state:
                     placed_meeples_data = game_state['placed_meeples']
-                    # print(f"CLIENT: Received placed_meeples data: {placed_meeples_data}")
+                    print(f"CLIENT: Received placed_meeples data: {placed_meeples_data}")
                     if placed_meeples_data:
                         self.game.state.placed_meeples = self._deserialize_placed_meeples(placed_meeples_data)
-                        # print(f"CLIENT: Updated placed_meeples. Count: {[len(p) for p in self.game.state.placed_meeples]}")
+                        print(f"CLIENT: Updated placed_meeples. Count: {[len(p) for p in self.game.state.placed_meeples]}")
+                        
+                        # Debug: Print detailed meeple info
+                        for player_idx, player_meeples in enumerate(self.game.state.placed_meeples):
+                            for meeple_idx, meeple_pos in enumerate(player_meeples):
+                                coord = meeple_pos.coordinate_with_side.coordinate
+                                side = meeple_pos.coordinate_with_side.side
+                                print(f"CLIENT: Player {player_idx} Meeple {meeple_idx}: [{coord.row},{coord.column}] {side.name} {meeple_pos.meeple_type.name}")
+                    else:
+                        print("CLIENT: No placed_meeples data received")
+                else:
+                    print("CLIENT: 'placed_meeples' key missing in game_state")
                 
                 print(f">>> Game state fully updated. Current player: {self.game.state.current_player}")
                 
@@ -232,7 +243,11 @@ class MultiplayerManager:
                     col = coord_data.get('column', 0)
                     
                     coordinate = Coordinate(row, col)
-                    side = Side[side_str] if side_str else Side.TOP
+                    side = self._str_to_side(side_str) if side_str else Side.TOP
+                    
+                    if side is None:
+                        print(f"ERROR: Could not deserialize side '{side_str}' for meeple")
+                        continue
                     
                     cws = CoordinateWithSide(coordinate, side)
                     
@@ -250,12 +265,21 @@ class MultiplayerManager:
         """Convert string to Side enum"""
         from wingedsheep.carcassonne.objects.side import Side
         try:
-            # Handle special cases if needed, but usually it's direct mapping
+            # Server sends side.name (e.g., "TOP"), so we need to match by name
+            # First try by name (what server actually sends)
+            for side in Side:
+                if side.name == side_str:
+                    return side
+            
+            # Fallback: try by value for backward compatibility
             for side in Side:
                 if side.value == side_str:
                     return side
+                    
+            print(f"WARNING: Could not find Side enum for string: '{side_str}'")
             return None
-        except:
+        except Exception as e:
+            print(f"ERROR in _str_to_side: {e}")
             return None
 
     def _deserialize_connection(self, conn_data):

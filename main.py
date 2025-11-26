@@ -108,6 +108,17 @@ def on_game_updated(data):
     if game:
         print(f"Game updated. Current player: {game.state.current_player}")
         print(f"Scores: {game.state.scores}")
+        
+        # total_meeples = sum(len(player_meeples) for player_meeples in game.state.placed_meeples)
+        # print(f"CALLBACK: Total meeples in game state: {total_meeples}")
+        
+        if data.get('immediate_refresh'):
+            print(f"CALLBACK: ⚡ IMMEDIATE REFRESH requested - meeples: {data.get('meeple_count', 0)}")
+            
+            # Force immediate screen redraw if we're in game
+            if GAME_STATE == STATE_GAME_RUNNING:
+                print("CALLBACK: 🔄 Forcing immediate UI refresh for meeple sync...")
+        
     print("=== END UPDATE CALLBACK ===")
 
 def on_game_finished(data):

@@ -67,9 +67,18 @@ def draw_placed_meeples(window, game_state):
     from resources import big_meeple_position_offsets, meeple_position_offsets
     
     total_meeples = sum(len(player_meeples) for player_meeples in game_state.placed_meeples)
-    if total_meeples > 0:
-        print(f"DRAW: Drawing {total_meeples} total meeples")
     
+    # Only log when there are meeples to draw (reduce spam)
+    if total_meeples > 0:
+        # Use a simple cache to avoid logging the same count repeatedly
+        if not hasattr(draw_placed_meeples, '_last_meeple_count'):
+            draw_placed_meeples._last_meeple_count = 0
+        
+        if draw_placed_meeples._last_meeple_count != total_meeples:
+            print(f"DRAW: 🎯 Meeple count changed: {draw_placed_meeples._last_meeple_count} → {total_meeples}")
+            draw_placed_meeples._last_meeple_count = total_meeples
+    
+    meeples_drawn = 0
     for player, placed_meeples in enumerate(game_state.placed_meeples):
         for meeple_idx, meeple_position in enumerate(placed_meeples):
             meep_type = meeple_position.meeple_type
@@ -90,8 +99,12 @@ def draw_placed_meeples(window, game_state):
             x = col * TILE_SIZE + CENTER_OFFSET_X + offsets[side][0] - (meep_img.get_width() / 2)
             y = row * TILE_SIZE + CENTER_OFFSET_Y + offsets[side][1] - (meep_img.get_height() / 2)
             
-            print(f"DRAW: Player {player} Meeple at [{row},{col}] {side.name}")
+            # Only log first few meeples to avoid spam
+            if meeples_drawn < 3 and total_meeples > draw_placed_meeples._last_meeple_count:
+                print(f"DRAW: Player {player} Meeple at [{row},{col}] {side.name}")
+            
             window.blit(meep_img, (x, y))
+            meeples_drawn += 1
 
 
 def draw_board(window, font, game_state, drag_pos, game, wood_texture, phase_name_func, ghost_surface, is_my_turn=True):

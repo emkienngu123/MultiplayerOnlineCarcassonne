@@ -117,51 +117,57 @@ class MultiplayerManager:
         
         if self.game and game_state:
             try:
-                # Cập nhật current player
-                if 'current_player' in game_state:
-                    self.game.state.current_player = game_state['current_player']
-                    
-                # Cập nhật scores
-                if 'scores' in game_state:
-                    self.game.state.scores = game_state['scores']
-                    
-                # Cập nhật meeples
-                if 'meeples' in game_state:
-                    self.game.state.meeples = game_state['meeples']
+                print(f"CLIENT: Received game update - processing in correct order...")
                 
-                # Cập nhật phase
+                # IMPORTANT: Update in the correct order to avoid inconsistencies
+                
+                # 1. Update current player FIRST
+                if 'current_player' in game_state:
+                    old_player = self.game.state.current_player
+                    self.game.state.current_player = game_state['current_player']
+                    print(f"CLIENT: Current player: {old_player} → {self.game.state.current_player}")
+                    
+                # 2. Update phase SECOND  
                 if 'phase' in game_state:
                     phase_str = game_state['phase']
-                    print(f">>> Updating phase to: {phase_str}")
+                    old_phase = str(self.game.state.phase)
+                    print(f"CLIENT: Updating phase: {old_phase} → {phase_str}")
                     # Convert string back to Enum
-                    if phase_str == "tiles":
+                    if phase_str == "GamePhase.TILES" or phase_str == "tiles":
                         self.game.state.phase = GamePhase.TILES
-                    elif phase_str == "meeples":
+                    elif phase_str == "GamePhase.MEEPLES" or phase_str == "meeples":
                         self.game.state.phase = GamePhase.MEEPLES
                     else:
                         print(f"Warning: Unknown phase string: {phase_str}")
                 
-                # Cập nhật next_tile - QUAN TRỌNG!
+                # 3. Update scores
+                if 'scores' in game_state:
+                    self.game.state.scores = game_state['scores']
+                    
+                # 4. Update meeples count
+                if 'meeples' in game_state:
+                    self.game.state.meeples = game_state['meeples']
+                    
+                # 5. Update board state
+                if 'board' in game_state:
+                    board_data = game_state['board']
+                    print(f"CLIENT: Received board update with {len(board_data)} rows")
+                    self._deserialize_board(board_data)
+                
+                # 6. Update next_tile
                 if 'next_tile' in game_state:
                     next_tile_data = game_state['next_tile']
                     if next_tile_data:
-                        print(f">>> Next tile info: {next_tile_data}")
-                        # Deserialize next_tile từ server
+                        print(f"CLIENT: Next tile info: {next_tile_data}")
                         deserialized_next_tile = self._deserialize_tile(next_tile_data)
                         if deserialized_next_tile:
                             self.game.state.next_tile = deserialized_next_tile
                             print("CLIENT: Next tile updated successfully")
                     else:
                         self.game.state.next_tile = None
-                        print(">>> No next tile")
+                        print("CLIENT: No next tile")
                 
-                # Cập nhật board - QUAN TRỌNG!
-                if 'board' in game_state:
-                    board_data = game_state['board']
-                    print(f"CLIENT: Received board update with {len(board_data)} rows")
-                    self._deserialize_board(board_data)
-                
-                # Cập nhật last_tile_action - QUAN TRỌNG CHO MEEPLE PHASE!
+                # 7. Update last_tile_action
                 if 'last_tile_action' in game_state:
                     action_data = game_state['last_tile_action']
                     if action_data:
@@ -170,50 +176,54 @@ class MultiplayerManager:
                         if last_action:
                             self.game.state.last_tile_action = last_action
                             print(f"CLIENT: last_tile_action updated: {type(last_action).__name__}")
-                            if hasattr(last_action, 'tile'):
-                                print(f"CLIENT: last_tile_action.tile: {last_action.tile}")
-                            else:
-                                print("CLIENT: last_tile_action HAS NO TILE ATTRIBUTE!")
                         else:
                             print("CLIENT: Failed to deserialize last_tile_action")
                     else:
-                        print("CLIENT: last_tile_action data is None")
                         self.game.state.last_tile_action = None
-                else:
-                    print("CLIENT: 'last_tile_action' key missing in game_state")
                 
-                # Cập nhật tiles remaining
+                # 8. Update tiles remaining
                 if 'tiles_remaining' in game_state:
                     tiles_remaining = game_state['tiles_remaining']
-                    print(f">>> Tiles remaining: {tiles_remaining}")
-                    # Update deck size if needed
-                    
-                # Cập nhật placed_meeples - QUAN TRỌNG!
+                    print(f"CLIENT: Tiles remaining: {tiles_remaining}")
+                
+                # 9. FINAL STEP: Update placed_meeples LAST to ensure all context is set
                 if 'placed_meeples' in game_state:
                     placed_meeples_data = game_state['placed_meeples']
                     print(f"CLIENT: Received placed_meeples data: {placed_meeples_data}")
                     if placed_meeples_data:
+                        old_count = sum(len(p) for p in self.game.state.placed_meeples)
                         self.game.state.placed_meeples = self._deserialize_placed_meeples(placed_meeples_data)
-                        print(f"CLIENT: Updated placed_meeples. Count: {[len(p) for p in self.game.state.placed_meeples]}")
+                        new_count = sum(len(p) for p in self.game.state.placed_meeples)
+                        print(f"CLIENT: Updated placed_meeples: {old_count} → {new_count} total meeples")
                         
-                        # Debug: Print detailed meeple info
-                        for player_idx, player_meeples in enumerate(self.game.state.placed_meeples):
-                            for meeple_idx, meeple_pos in enumerate(player_meeples):
-                                coord = meeple_pos.coordinate_with_side.coordinate
-                                side = meeple_pos.coordinate_with_side.side
-                                print(f"CLIENT: Player {player_idx} Meeple {meeple_idx}: [{coord.row},{coord.column}] {side.name} {meeple_pos.meeple_type.name}")
+                        # Debug: Print detailed meeple info only if there are meeples
+                        if new_count > 0:
+                            for player_idx, player_meeples in enumerate(self.game.state.placed_meeples):
+                                for meeple_idx, meeple_pos in enumerate(player_meeples):
+                                    coord = meeple_pos.coordinate_with_side.coordinate
+                                    side = meeple_pos.coordinate_with_side.side
+                                    print(f"CLIENT: Player {player_idx} Meeple {meeple_idx}: [{coord.row},{coord.column}] {side.name} {meeple_pos.meeple_type.name}")
                     else:
                         print("CLIENT: No placed_meeples data received")
                 else:
                     print("CLIENT: 'placed_meeples' key missing in game_state")
                 
-                print(f">>> Game state fully updated. Current player: {self.game.state.current_player}")
+                print(f"CLIENT: ✅ Game state fully updated. Current player: {self.game.state.current_player}, Phase: {self.game.state.phase}")
+                
+                # Force immediate UI refresh by triggering callback with updated flag
+                self._trigger_callback('game_updated', {
+                    **message,
+                    'immediate_refresh': True,
+                    'meeple_count': sum(len(p) for p in self.game.state.placed_meeples)
+                })
+                return  # Early return to avoid double callback
                 
             except Exception as e:
                 print(f"Error updating game state: {e}")
                 import traceback
                 traceback.print_exc()
         
+        # Fallback callback if no game object
         self._trigger_callback('game_updated', message)
 
     def _deserialize_placed_meeples(self, placed_meeples_data):
